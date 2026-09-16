@@ -95,6 +95,10 @@ impl InputCapture for RdevCapture {
             .move_mouse(x as i32, y as i32, Coordinate::Abs)
             .map_err(|e| InputError::Capture(e.to_string()))
     }
+
+    fn set_suppress(&self, on: bool) {
+        self.suppress.store(on, Ordering::Relaxed);
+    }
 }
 
 pub struct RdevInjector {

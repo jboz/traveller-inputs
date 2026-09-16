@@ -27,6 +27,9 @@ pub trait InputCapture: Send + 'static {
     ) -> Result<(), InputError>;
     fn position(&self) -> Result<(f64, f64), InputError>;
     fn set_position(&self, x: f64, y: f64) -> Result<(), InputError>;
+    /// Supprime la capture (ne pas émettre les mouvements) pendant un parking.
+    #[allow(unused_variables)]
+    fn set_suppress(&self, on: bool) {}
 }
 
 pub trait InputInjector {
