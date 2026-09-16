@@ -26,7 +26,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxkbcommon-dev
+          sudo apt-get install -y libx11-dev libxkbcommon-dev libxi-dev libxext-dev libxrandr-dev libxcursor-dev libxinerama-dev libxft-dev
 
       - name: Build release
         run: cargo build --release
