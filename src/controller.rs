@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use crate::config::Config;
 use crate::focus::{FocusState, StepOutcome};
 use crate::geometry::{Geometry, Side};
 use crate::input::{InputCapture, InputEvent};
+use crate::keymap::{CanonKey, parse_emergency_combo};
 use crate::transport::protocol::Msg;
 use crate::transport::{ConnEvent, TransportHandle};
 
@@ -93,6 +95,8 @@ pub async fn run_controller<C: InputCapture, T: ClipboardSource>(
     let mut cb_interval = tokio::time::interval(clipboard.interval());
     cb_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     cb_interval.tick().await;
+    let emergency = parse_emergency_combo(&cfg.keys.emergency_stop)?;
+    let mut pressed_keys: HashSet<CanonKey> = HashSet::new();
     tracing::info!("contrôleur actif (focus local)");
 
     loop {
@@ -123,9 +127,16 @@ pub async fn run_controller<C: InputCapture, T: ClipboardSource>(
                         let _ = handle.send.send(Msg::PointerButton { button, pressed });
                     }
                 }
-                Some(InputEvent::Key { code, pressed }) => {
+                Some(InputEvent::Key { code, pressed: down }) => {
+                    let canon = CanonKey::from_code(code);
+                    if down { pressed_keys.insert(canon); } else { pressed_keys.remove(&canon); }
+                    if down && emergency.iter().all(|k| pressed_keys.contains(k)) {
+                        tracing::warn!("arrêt d'urgence détecté ({})", cfg.keys.emergency_stop);
+                        core.force_local();
+                        return Ok(());
+                    }
                     if core.focus.is_remote() {
-                        let _ = handle.send.send(Msg::Key { code, pressed });
+                        let _ = handle.send.send(Msg::Key { code, pressed: down });
                     }
                 }
                 Some(InputEvent::Wheel { delta_y }) => {

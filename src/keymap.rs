@@ -1,6 +1,74 @@
 use rdev::Key;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Parse une combinaison de touches "Ctrl+Alt+F10" → ensemble de CanonKey.
+/// Les modificateurs sont normalisés (CtrlL représente Ctrl gauche ou droit).
+pub fn parse_emergency_combo(s: &str) -> anyhow::Result<Vec<CanonKey>> {
+    let mut out: Vec<CanonKey> = Vec::new();
+    for tok in s.split('+') {
+        let t = tok.trim();
+        let k = match t.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" | "ctrlleft" | "ctrlright" => CanonKey::CtrlL,
+            "alt" | "altleft" | "altright" => CanonKey::AltL,
+            "shift" | "shiftleft" | "shiftright" => CanonKey::ShiftL,
+            "meta" | "win" | "super" => CanonKey::MetaL,
+            "space" | " " => CanonKey::Space,
+            "enter" => CanonKey::Enter,
+            "tab" => CanonKey::Tab,
+            "escape" | "esc" => CanonKey::Escape,
+            v if v.starts_with('f') && v.len() > 1 => {
+                let n: u16 = v[1..].parse()?;
+                if !(1..=12).contains(&n) {
+                    anyhow::bail!("touche fonction {t} non supportée");
+                }
+                CanonKey::from_code(49 + n)
+            }
+            v if v.len() == 1 => {
+                let c = v.chars().next().unwrap();
+                if c.is_ascii_alphabetic() {
+                    let idx = (c.to_ascii_uppercase() as u8 - b'A') as u16;
+                    CanonKey::from_code(idx + 1)
+                } else if c.is_ascii_digit() {
+                    let n = c.to_digit(10).unwrap() as u16;
+                    CanonKey::from_code(if n == 0 { 27 } else { 27 + n })
+                } else {
+                    anyhow::bail!("touche inconnue dans la combinaison: {t}");
+                }
+            }
+            _ => anyhow::bail!("touche inconnue dans la combinaison: {t}"),
+        };
+        out.push(k);
+    }
+    if out.is_empty() {
+        anyhow::bail!("combinaison d'urgence vide");
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod combo_tests {
+    use super::*;
+
+    #[test]
+    fn combo_parsee() {
+        let c = parse_emergency_combo("Ctrl+Alt+F10").unwrap();
+        assert_eq!(c, vec![CanonKey::CtrlL, CanonKey::AltL, CanonKey::F10]);
+    }
+
+    #[test]
+    fn lettres_et_chiffres() {
+        assert_eq!(parse_emergency_combo("Shift+Z").unwrap(), vec![CanonKey::ShiftL, CanonKey::KeyZ]);
+        assert_eq!(parse_emergency_combo("Alt+9").unwrap(), vec![CanonKey::AltL, CanonKey::D9]);
+        assert!(parse_emergency_combo("Key0").is_err());
+    }
+
+    #[test]
+    fn inconnue_rejetee() {
+        assert!(parse_emergency_combo("Ctrl+Brouzouf").is_err());
+        assert!(parse_emergency_combo("").is_err());
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CanonKey {
     KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM,
     KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
@@ -121,7 +189,6 @@ pub fn rdev_key_to_canon(k: &Key) -> CanonKey {
         K::Pause => CanonKey::Pause,
         K::BackQuote => CanonKey::Other { code: CanonKey::Equal.code() + 100 },
         K::IntlBackslash => CanonKey::Other { code: CanonKey::Equal.code() + 101 },
-        K::AltGr => CanonKey::AltR,
         _ => {
             tracing::warn!("touche hors table: {k:?}");
             CanonKey::Other { code: u16::MAX }
