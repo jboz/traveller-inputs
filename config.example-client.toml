@@ -1,11 +1,12 @@
 # Configuration du CLIENT — machine contrôlée à distance.
 # Ses périphériques physiques existent mais sont ignorés.
+# Voir README.md pour la topologie et le 1er lancement.
 
 role = "client"                # "controller" | "client"
 
-# Le client se connecte au contrôleur (l'autre machine écoute) :
+# Le client ÉCOUTE (redirection de port sur CETTE machine) :
 listen = "0.0.0.0:7722"
-# OU, si c'est la machine qui écoute :
+# OU, si le contrôleur écoute :
 # peer_addr = "mondyndns.ddns.net:7722"
 
 # Écran de CETTE machine
@@ -15,11 +16,11 @@ peer_screen = { width = 1920, height = 1080 }
 # Position du client vue du contrôleur : bord droit ou gauche
 side = "right"
 
-# Empreinte SHA-256 du certificat du contrôleur.
-# Vide au 1er lancement : la connexion est acceptée et l'empreinte reçue est
-# affichée par l'app ; copiez-la ici sous la forme sha256:<64 hex>.
-# Une fois renseignée, toute connexion dont l'empreinte diffère est refusée.
-peer_fingerprint = "sha256:"
+# Empreinte SHA-256 du certificat du CONTROLEUR.
+# Au 1er lancement : laissez cette ligne commentée, la connexion est acceptée
+# et l'empreinte reçue est affichée par l'app. Copiez-la ensuite ici sous la
+# forme "sha256:<64 hex>" : toute connexion à empreinte différente sera refusée.
+# peer_fingerprint = "sha256:"
 
 # Certificat/clé auto-signés générés au 1er lancement (chemins relatifs au fichier de config)
 cert_path = "data/cert.pem"

@@ -1,12 +1,13 @@
-# Configuration du CONTROLEUR — machine qui possède souris/clavier physiques.
-# Le contrôleur EST FIXE : pas de rotation de rôle entre les deux machines.
+# Configuration du CONTROLEUR — machine qui possède la souris/le clavier physiques.
+# Le contrôleur est FIXE : seule cette machine contrôle, l'autre est le client.
+# Voir README.md pour la topologie et le 1er lancement.
 
 role = "controller"            # "controller" | "client"
 
-# Cette machine écoute (redirection de port nécessaire) :
-listen = "0.0.0.0:7722"
-# OU cette machine se connecte (mutuellement exclusif avec `listen`) :
-# peer_addr = "mondyndns.ddns.net:7722"
+# Le CLIENT écoute (redirection de port sur LA MACHINE CLIENTE), le contrôleur se connecte :
+peer_addr = "mondyndns.ddns.net:7722"
+# OU, si c'est le contrôleur qui écoute :
+# listen = "0.0.0.0:7722"
 
 # Écran de CETTE machine
 screen = { width = 1920, height = 1080 }
@@ -15,11 +16,11 @@ peer_screen = { width = 2560, height = 1440 }
 # Position du client vue du contrôleur : bord droit ou gauche
 side = "right"
 
-# Empreinte SHA-256 du certificat du client.
-# Vide au 1er lancement : la connexion est acceptée et l'empreinte reçue est
-# affichée par l'app ; copiez-la ici sous la forme sha256:<64 hex>.
-# Une fois renseignée, toute connexion dont l'empreinte diffère est refusée.
-peer_fingerprint = "sha256:"
+# Empreinte SHA-256 du certificat du CLIENT.
+# Au 1er lancement : laissez cette ligne commentée, la connexion est acceptée
+# et l'empreinte reçue est affichée par l'app. Copiez-la ensuite ici sous la
+# forme "sha256:<64 hex>" : toute connexion à empreinte différente sera refusée.
+# peer_fingerprint = "sha256:"
 
 # Certificat/clé auto-signés générés au 1er lancement (chemins relatifs au fichier de config)
 cert_path = "data/cert.pem"
