@@ -2,7 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
+use tokio::time::MissedTickBehavior;
 
+use crate::clipboard::{ClipboardBridge, ClipboardSource};
 use crate::coalescer::Coalescer;
 use crate::config::Config;
 use crate::focus::{FocusState, StepOutcome};
@@ -77,16 +79,20 @@ fn geom_from(cfg: &Config) -> Geometry {
     }
 }
 
-pub async fn run_controller<C: InputCapture>(
+pub async fn run_controller<C: InputCapture, T: ClipboardSource>(
     cfg: Arc<Config>,
     handle: TransportHandle,
     mut events: mpsc::UnboundedReceiver<ConnEvent>,
     capture: C,
+    clipboard: ClipboardBridge<T>,
 ) -> anyhow::Result<()> {
     let geom = geom_from(&cfg);
     let mut core = ControllerCore::new(geom);
     let (tx_input, mut rx_input) = mpsc::unbounded_channel::<InputEvent>();
     capture.spawn_capture(tx_input)?;
+    let mut cb_interval = tokio::time::interval(clipboard.interval());
+    cb_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    cb_interval.tick().await;
     tracing::info!("contrôleur actif (focus local)");
 
     loop {
@@ -136,14 +142,20 @@ pub async fn run_controller<C: InputCapture>(
                 Some(ConnEvent::Msg(Msg::Ping { .. })) => {
                     // le transport répond déjà Pong automatiquement
                 }
+                Some(ConnEvent::Msg(Msg::Clipboard { content, .. })) => {
+                    clipboard.ingest(&content);
+                }
                 Some(ConnEvent::Msg(Msg::Quit)) => break,
                 Some(ConnEvent::Closed(e)) => {
                     tracing::warn!("session fermée: {e}");
                     core.force_local();
                 }
-                // Clipboard géré par le service presse-papiers (Task 14).
+                // Autres messages ignorés.
                 Some(ConnEvent::Msg(_)) => {}
                 None => break,
+            },
+            _ = cb_interval.tick() => {
+                clipboard.tick_send(&handle);
             },
         }
     }

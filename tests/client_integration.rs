@@ -1,8 +1,25 @@
+use std::sync::{Arc, Mutex};
+
 use traveller::client::run_client;
+use traveller::clipboard::{ClipboardBridge, ClipboardSource};
+use traveller::config::ClipboardConfig;
 use traveller::input::{InputError, InputInjector};
 use traveller::transport::protocol::Msg;
 use traveller::transport::{ConnEvent, TransportHandle};
 use tokio::sync::mpsc;
+
+#[derive(Debug, Default)]
+struct NoopSource(Arc<Mutex<String>>);
+
+impl ClipboardSource for NoopSource {
+    fn get(&mut self) -> anyhow::Result<String> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+    fn set(&mut self, s: &str) -> anyhow::Result<()> {
+        *self.0.lock().unwrap() = s.to_string();
+        Ok(())
+    }
+}
 
 #[derive(Debug, Default)]
 struct FakeInjector {
@@ -39,7 +56,8 @@ async fn injection_depuis_messages() {
     let handle = TransportHandle { send: tx_msg };
     let calls = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
     let injector = FakeInjector { calls: calls.clone() };
-    let task = tokio::spawn(run_client(handle, rx, injector));
+    let bridge = ClipboardBridge::new(NoopSource::default(), &ClipboardConfig { enabled: false, sync_interval_ms: 1, max_kb: 1024 });
+    let task = tokio::spawn(run_client(handle, rx, injector, bridge));
 
     tx.send(ConnEvent::Msg(Msg::CursorEnter { x: 100.0, y: 200.0 })).unwrap();
     tx.send(ConnEvent::Msg(Msg::PointerMove { rel_dx: 5.0, rel_dy: 3.0 })).unwrap();
