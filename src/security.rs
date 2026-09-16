@@ -62,20 +62,28 @@ pub fn parse_fingerprint(f: &str) -> anyhow::Result<[u8; 32]> {
     Ok(out)
 }
 
-/// Empreinte SHA-256 brute du DER du pair, après handshake.
+/// Empreinte SHA-256 brute du DER du pair, après handshake (rustls::Connection).
 pub fn peer_fingerprint_from_conn(conn: &rustls::Connection) -> anyhow::Result<[u8; 32]> {
-    let certs = conn.peer_certificates().context("aucun certificat pair")?;
+    peer_fingerprint_from_common(&**conn)
+}
+
+/// Empreinte SHA-256 brute du DER du pair, après handshake (CommonState).
+pub fn peer_fingerprint_from_common(common: &rustls::CommonState) -> anyhow::Result<[u8; 32]> {
+    let certs = common.peer_certificates().context("aucun certificat pair")?;
     let der = certs.first().context("liste vide")?;
     Ok(Sha256::digest(der.as_ref()).into())
 }
 
+/// TLS serveur : demande un certificat client (verif no-op, le pinning se fait
+/// APRÈS handshake sur l'empreinte exacte). mTLS obligatoire : chaque extrémité
+/// expose son certificat self-signed pour que les deux vérifient l'autre.
 pub fn server_tls_config(cert_pem: &[u8], key_pem: &[u8]) -> anyhow::Result<rustls::ServerConfig> {
     let certs = rustls_pemfile::certs(&mut &cert_pem[..]).collect::<Result<Vec<_>, _>>()?;
     let key = rustls_pemfile::private_key(&mut &key_pem[..])?.context("clé privée introuvable")?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     Ok(rustls::ServerConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()?
-        .with_no_client_auth()
+        .with_client_cert_verifier(Arc::new(NoVerifyClient))
         .with_single_cert(certs, key)?)
 }
 
@@ -120,13 +128,69 @@ impl rustls::client::danger::ServerCertVerifier for NoVerify {
     }
 }
 
-pub fn client_tls_config() -> anyhow::Result<rustls::ClientConfig> {
+/// Verifier no-op pour certificats client : le pinning est vérifié APRÈS
+/// handshake sur le DER exact.
+#[derive(Debug)]
+struct NoVerifyClient;
+
+impl rustls::server::danger::ClientCertVerifier for NoVerifyClient {
+    fn offer_client_auth(&self) -> bool {
+        true
+    }
+
+    fn client_auth_mandatory(&self) -> bool {
+        true
+    }
+
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+
+    fn verify_client_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _now: UnixTime,
+    ) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        Ok(rustls::server::danger::ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+/// TLS client : verifier serveur no-op (pinning post-handshake) + présentation
+/// de son propre certificat self-signed pour le mTLS.
+pub fn client_tls_config(cert_pem: &[u8], key_pem: &[u8]) -> anyhow::Result<rustls::ClientConfig> {
+    let certs = rustls_pemfile::certs(&mut &cert_pem[..]).collect::<Result<Vec<_>, _>>()?;
+    let key = rustls_pemfile::private_key(&mut &key_pem[..])?.context("clé privée introuvable")?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     Ok(rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()?
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(NoVerify))
-        .with_no_client_auth())
+        .with_client_auth_cert(certs, key)?)
 }
 
 fn first_cert_der(pem: &[u8]) -> anyhow::Result<CertificateDer<'static>> {
@@ -176,7 +240,7 @@ mod tests {
     #[test]
     fn loopback_handshake_retourne_empreinte_serveur() {
         let (s_cert, s_key) = generate_pair_pem().unwrap();
-        let (c_cert, _c_key) = generate_pair_pem().unwrap();
+        let (c_cert, c_key) = generate_pair_pem().unwrap();
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -189,10 +253,13 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let mut conn = rustls::ServerConnection::new(Arc::new(cfg)).unwrap();
             let _ = conn.complete_io(&mut stream);
+            let fp_peer = peer_fingerprint_from_conn(&rustls::Connection::Server(conn))
+                .expect("serveur doit voir le cert client (mTLS)");
+            hex::encode(fp_peer)
         });
 
         let client_conn = rustls::ClientConnection::new(
-            client_tls_config().unwrap().into(),
+            client_tls_config(&c_cert, &c_key).unwrap().into(),
             "traveller.local".try_into().unwrap(),
         )
         .unwrap();
@@ -203,6 +270,7 @@ mod tests {
         let fp = peer_fingerprint_from_conn(&conn).unwrap();
         assert_eq!(hex::encode(fp), expected.trim_start_matches("sha256:"));
         assert_ne!(hex::encode(fp), wrong.trim_start_matches("sha256:"));
-        server.join().unwrap();
+        let server_fp_observed = server.join().unwrap();
+        assert_eq!(server_fp_observed, wrong.trim_start_matches("sha256:"));
     }
 }
