@@ -68,7 +68,6 @@ impl Geometry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::geometry::{Geometry, ScreenSize, Side};
 
     fn g_1920_2560_right() -> Geometry {

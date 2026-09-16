@@ -69,8 +69,7 @@ impl FocusState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::focus::{Focus, FocusState, StepOutcome};
+    use crate::focus::{FocusState, StepOutcome};
     use crate::geometry::{Geometry, ScreenSize, Side};
 
     fn geom() -> Geometry {
